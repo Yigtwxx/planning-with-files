@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.38.1] - 2026-05-16
+
+### Fixed
+
+- **Description field garbled in Claude Code skill picker** (surfaced by @bmyury via Discussion #153): the canonical SKILL.md frontmatter declares hooks inline as YAML scalars. Several of those scalars contain `'---BEGIN PLAN DATA---'` and `'---END PLAN DATA---'` as plan-injection delimiters (introduced in v2.36.1, reinforced in v2.37 attestation). Frontmatter parsers that split on the literal string `---` to locate the closing fence read the first `---` inside a hook command as the fence, truncating the YAML mid-string. Claude Code's skill-discovery loader behaves this way, so the description shown in the in-product skill list was a fragment of the hook command tail (`BEGIN PLAN DATA---'; head -50 task_plan.md...`) instead of the documented description. Real YAML parsers handled the frontmatter correctly, so hook execution and tamper attestation were never affected; only the displayed metadata was wrong. v2.38.1 swaps the delimiter shape from `---BEGIN PLAN DATA---` / `---END PLAN DATA---` to `===BEGIN PLAN DATA===` / `===END PLAN DATA===` across the canonical SKILL.md, all five language variants, the `.codebuddy`, `.codex`, `.cursor` adapter mirrors, and the `clawhub-upload` bundle. Same delimiter shape, same model-side framing semantics; the `===` substring does not collide with YAML's document separator.
+
+### Changed
+
+- Version bumped to 2.38.1 across 14 SKILL.md variants, `plugin.json`, `marketplace.json`, and `CITATION.cff` via `scripts/bump-version.py`. `.continue`, `.gemini`, `.pi`, `.kiro` lag intentionally.
+- Pre-existing line-ending drift in IDE adapter mirrors (`examples.md`, `attest-plan.sh`, `attest-plan.ps1` under `.codex`, `.cursor`, `.gemini`, `.opencode`, `.pi`) normalized to LF via `scripts/sync-ide-folders.py`. 12 files touched, content identical to canonical.
+
+### Thanks
+
+- @bmyury for surfacing the description display bug via Discussion #153.
+
 ## [2.38.0] - 2026-05-14
 
 ### Added

@@ -104,6 +104,11 @@ These amazing people have contributed code, documentation, or significant improv
 
 ### Other Contributors
 
+- **[@bmyury](https://github.com/bmyury)** - [Discussion #153](https://github.com/OthmanAdi/planning-with-files/discussions/153)
+  - Reported that the installed skill's description field appeared garbled in Claude Code, surfacing fragments of hook command output instead of the documented description
+  - Root cause: the `'---BEGIN PLAN DATA---'` and `'---END PLAN DATA---'` plan-injection delimiters embedded in hook commands collided with the `---` YAML document separator; Claude Code's skill-discovery loader split frontmatter on the literal `---` substring and truncated the description mid-string
+  - **Impact:** v2.38.1 swaps the delimiter shape to `===BEGIN PLAN DATA===` / `===END PLAN DATA===` across the canonical SKILL.md, all five language variants, the `.codebuddy/.codex/.cursor` adapter mirrors, and the `clawhub-upload` bundle. Same model-side framing semantics, no collision with the YAML separator
+
 - **[@oaabahussain](https://github.com/oaabahussain)** - [Issue #150](https://github.com/OthmanAdi/planning-with-files/issues/150), [Issue #151](https://github.com/OthmanAdi/planning-with-files/issues/151)
   - Issue #150: pointed out that the v2.36.1 BEGIN/END delimiters were a mitigation, not a guarantee, and proposed SHA-256 hash attestation so any silent edit to `task_plan.md` between user approval and hook injection trips a verifiable check
   - Issue #151: named the regression class behind v2.34.1, v2.36.0, v2.36.2, and v2.36.3 (parity-locked files updated by hand across 19 destinations) and proposed the right surgical fix: a single bumper script plus a CI parity test
