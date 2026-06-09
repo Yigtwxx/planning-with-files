@@ -148,7 +148,15 @@ try {
             $rc = 1
         } else {
             # Atomic-enough swap: write temp, then move over the target.
-            Set-Content -LiteralPath $tmpFile -Value $out -Encoding utf8
+            # Write BOM-less UTF-8 (platform-major): Set-Content -Encoding utf8 on
+            # Windows PowerShell 5.1 prepends a UTF-8 BOM (EF BB BF). The temp file
+            # then replaces task_plan.md, so every phase-status call from PS 5.1
+            # changes the file's leading bytes. If the plan was created on Linux or
+            # macOS (no BOM), the stored attestation SHA-256 no longer matches and
+            # inject-plan.sh blocks all further injection as [PLAN TAMPERED]. A
+            # UTF8Encoding constructed with $false emits no BOM on every PS version.
+            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllLines($tmpFile, $out, $utf8NoBom)
             Move-Item -LiteralPath $tmpFile -Destination $planFile -Force
         }
     }

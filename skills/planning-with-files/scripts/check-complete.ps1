@@ -55,17 +55,23 @@ $content = Get-Content $PlanFile -Raw
 # Count total phases
 $TOTAL = ([regex]::Matches($content, "### Phase")).Count
 
-# Check for **Status:** format first
-$COMPLETE = ([regex]::Matches($content, "\*\*Status:\*\* complete")).Count
-$IN_PROGRESS = ([regex]::Matches($content, "\*\*Status:\*\* in_progress")).Count
-$PENDING = ([regex]::Matches($content, "\*\*Status:\*\* pending")).Count
+# Count both formats per field and keep the larger of the two. A plan may mix
+# '**Status:** pending' on one phase with '[in_progress]' on another; counting
+# only the primary format (and falling back to inline ONLY when all three
+# primaries are zero) lost the inline count and let an in_progress plan slip
+# past the gate. Per-field max preserves the legacy single-format result
+# (the other format contributes 0) while catching mixed plans.
+$completePrimary = ([regex]::Matches($content, "\*\*Status:\*\* complete")).Count
+$inProgressPrimary = ([regex]::Matches($content, "\*\*Status:\*\* in_progress")).Count
+$pendingPrimary = ([regex]::Matches($content, "\*\*Status:\*\* pending")).Count
 
-# Fallback: check for [complete] inline format if **Status:** not found
-if ($COMPLETE -eq 0 -and $IN_PROGRESS -eq 0 -and $PENDING -eq 0) {
-    $COMPLETE = ([regex]::Matches($content, "\[complete\]")).Count
-    $IN_PROGRESS = ([regex]::Matches($content, "\[in_progress\]")).Count
-    $PENDING = ([regex]::Matches($content, "\[pending\]")).Count
-}
+$completeInline = ([regex]::Matches($content, "\[complete\]")).Count
+$inProgressInline = ([regex]::Matches($content, "\[in_progress\]")).Count
+$pendingInline = ([regex]::Matches($content, "\[pending\]")).Count
+
+$COMPLETE = [Math]::Max($completePrimary, $completeInline)
+$IN_PROGRESS = [Math]::Max($inProgressPrimary, $inProgressInline)
+$PENDING = [Math]::Max($pendingPrimary, $pendingInline)
 
 # advisory_report: the v2.43 status echo.
 function Write-AdvisoryReport {
@@ -115,7 +121,12 @@ try {
 } catch {
     $stdinJson = ""
 }
-if ($stdinJson -match '"stop_hook_active"\s*:\s*true') {
+# Anchor on the literal value: "stop_hook_active" then colon then exactly true,
+# with a JSON-structural boundary after it (whitespace, comma, closing brace, or
+# end of input). Without the boundary 'true' could match a longer token; the
+# boundary keeps a 'false' value (or any other key set to true) from tripping
+# the guard and silently disabling the gate.
+if ($stdinJson -match '"stop_hook_active"\s*:\s*true(\s|,|}|$)') {
     Write-AdvisoryReport
     exit 0
 }
@@ -190,12 +201,38 @@ function Get-FirstInProgressPhase {
 $phaseName = Get-FirstInProgressPhase
 if ($phaseName -eq "") { $phaseName = "unknown phase" }
 
-# JSON-escape: backslash and double-quote only (phase heading is single-line text).
-$phaseEscaped = $phaseName.Replace('\', '\\').Replace('"', '\"')
+# JSON-escape: backslash and double-quote, plus every bare control character
+# JSON forbids (below 0x20) mapped to a space. A phase heading may carry a
+# literal tab; left raw it produces invalid JSON the Stop hook rejects. Same
+# logic as ledger-append.ps1 ConvertTo-JsonString.
+function ConvertTo-JsonEscaped {
+    param([string] $Value)
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($ch in $Value.ToCharArray()) {
+        switch ($ch) {
+            '"'  { [void]$sb.Append('\"') }
+            '\'  { [void]$sb.Append('\\') }
+            default {
+                if ([int]$ch -lt 32) {
+                    [void]$sb.Append(' ')
+                } else {
+                    [void]$sb.Append($ch)
+                }
+            }
+        }
+    }
+    return $sb.ToString()
+}
+$phaseEscaped = ConvertTo-JsonEscaped $phaseName
 
 $newBlocks = $blocks + 1
-try { Set-Content -Path $blocksFile -Value $newBlocks -NoNewline:$false -ErrorAction SilentlyContinue } catch {}
-try { Set-Content -Path $ledgerFile -Value $ledgerNow -NoNewline:$false -ErrorAction SilentlyContinue } catch {}
+# Write sidecars as ASCII (single-byte digits) with an explicit LF and no BOM.
+# Set-Content on Windows emits CRLF; check-complete.sh then reads '5\r', whose
+# trailing CR makes the numeric guard reset BLOCKS to 0 on every cross-platform
+# read, so the cap and stall guards never fire. WriteAllText with ASCII gives
+# byte-for-byte '5\n' that both shells parse identically.
+try { [System.IO.File]::WriteAllText($blocksFile, [string]$newBlocks + "`n", [System.Text.Encoding]::ASCII) } catch {}
+try { [System.IO.File]::WriteAllText($ledgerFile, [string]$ledgerNow + "`n", [System.Text.Encoding]::ASCII) } catch {}
 
 # Reason built from the JSON-escaped phase name; the surrounding template text
 # has no quotes or backslashes, so only the heading needs escaping.

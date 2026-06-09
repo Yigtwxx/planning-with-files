@@ -186,6 +186,16 @@ intentional edit. In multi-agent runs the orchestrator re-attests at phase bound
 worker editing the plan would break the hash by design. This is what makes the AcceptanceCheck
 command safe to run.
 
+### SHA cache location moved
+
+The hook's mtime-SHA cache moved from `${TMPDIR:-/tmp}/pwf-sha` (v2) to `$HOME/.cache/pwf-sha`
+(or `$XDG_CACHE_HOME/pwf-sha` when set). This removes the shared-tmp poisoning surface. The
+move is silent: a warm v2 cache under `/tmp/pwf-sha` is never read by v3, so the first session
+after upgrade rehashes every attested plan once. That is the correct behavior (no stale reads),
+and the cache repopulates immediately. On a large collection of attested plans on slow Windows
+Git Bash, that first rehash can show as a one-time per-turn latency bump; subsequent sessions are
+back to cache speed. No action is needed, and the old `/tmp/pwf-sha` directory can be deleted.
+
 ## Quickstart: try gated mode in two commands
 
 ```bash

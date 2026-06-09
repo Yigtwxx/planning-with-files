@@ -68,12 +68,14 @@ sanitize_agent() {
 }
 
 # Escape a string for embedding inside a JSON string literal: backslash, double
-# quote, and the control chars that JSON forbids bare. Newlines/tabs/CR become
-# spaces (summary is single-line by contract; this also covers stray controls).
+# quote, and every bare control character JSON forbids. The single tr range
+# 0x01-0x1F maps newline, CR, tab, vertical-tab (0x0B), form-feed (0x0C) and the
+# rest of 0x01-0x08/0x0E-0x1F to spaces in one pass, matching the PS1
+# ConvertTo-JsonString behavior so JSONL stays cross-platform parseable.
 json_escape() {
     printf '%s' "$1" \
         | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
-        | tr '\n\r\t' '   '
+        | tr '\001-\037' ' '
 }
 
 # Largest numeric tick already present across every ledger-*.jsonl in the dir.

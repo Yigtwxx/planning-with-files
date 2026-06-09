@@ -70,17 +70,26 @@ fi
 # Count total phases
 TOTAL=$(grep -c "### Phase" "$PLAN_FILE" || true)
 
-# Check for **Status:** format first
-COMPLETE=$(grep -cF "**Status:** complete" "$PLAN_FILE" || true)
-IN_PROGRESS=$(grep -cF "**Status:** in_progress" "$PLAN_FILE" || true)
-PENDING=$(grep -cF "**Status:** pending" "$PLAN_FILE" || true)
+# Count both formats per field and keep the larger of the two. A plan may mix
+# '**Status:** pending' on one phase with '[in_progress]' on another; counting
+# only the primary format (and falling back to inline ONLY when all three
+# primaries are zero) lost the inline count and let an in_progress plan slip
+# past the gate. Per-field max preserves the legacy single-format result
+# (the other format contributes 0) while catching mixed plans.
+COMPLETE_PRIMARY=$(grep -cF "**Status:** complete" "$PLAN_FILE" || true)
+IN_PROGRESS_PRIMARY=$(grep -cF "**Status:** in_progress" "$PLAN_FILE" || true)
+PENDING_PRIMARY=$(grep -cF "**Status:** pending" "$PLAN_FILE" || true)
 
-# Fallback: check for [complete] inline format if **Status:** not found
-if [ "$COMPLETE" -eq 0 ] && [ "$IN_PROGRESS" -eq 0 ] && [ "$PENDING" -eq 0 ]; then
-    COMPLETE=$(grep -c "\[complete\]" "$PLAN_FILE" || true)
-    IN_PROGRESS=$(grep -c "\[in_progress\]" "$PLAN_FILE" || true)
-    PENDING=$(grep -c "\[pending\]" "$PLAN_FILE" || true)
-fi
+COMPLETE_INLINE=$(grep -c "\[complete\]" "$PLAN_FILE" || true)
+IN_PROGRESS_INLINE=$(grep -c "\[in_progress\]" "$PLAN_FILE" || true)
+PENDING_INLINE=$(grep -c "\[pending\]" "$PLAN_FILE" || true)
+
+: "${COMPLETE_PRIMARY:=0}"; : "${IN_PROGRESS_PRIMARY:=0}"; : "${PENDING_PRIMARY:=0}"
+: "${COMPLETE_INLINE:=0}";  : "${IN_PROGRESS_INLINE:=0}";  : "${PENDING_INLINE:=0}"
+
+if [ "$COMPLETE_INLINE" -gt "$COMPLETE_PRIMARY" ]; then COMPLETE="$COMPLETE_INLINE"; else COMPLETE="$COMPLETE_PRIMARY"; fi
+if [ "$IN_PROGRESS_INLINE" -gt "$IN_PROGRESS_PRIMARY" ]; then IN_PROGRESS="$IN_PROGRESS_INLINE"; else IN_PROGRESS="$IN_PROGRESS_PRIMARY"; fi
+if [ "$PENDING_INLINE" -gt "$PENDING_PRIMARY" ]; then PENDING="$PENDING_INLINE"; else PENDING="$PENDING_PRIMARY"; fi
 
 # Default to 0 if empty
 : "${TOTAL:=0}"
@@ -126,12 +135,20 @@ STDIN_JSON=""
 if [ ! -t 0 ]; then
     STDIN_JSON="$(cat 2>/dev/null)"
 fi
-case "${STDIN_JSON}" in
-    *'"stop_hook_active"'*[Tt]rue*)
-        advisory_report
-        exit 0
-        ;;
-esac
+# Anchor on the VALUE: "stop_hook_active" immediately followed (allowing
+# whitespace and the colon) by true. A bare glob like *stop_hook_active*true*
+# false-positives on '{"stop_hook_active": false, "other": true}', which would
+# silently disable the gate. Newlines are collapsed so the match works whether
+# the payload is pretty-printed or single-line.
+STOP_HOOK_ACTIVE="$(
+    printf '%s' "${STDIN_JSON}" \
+        | tr '\n' ' ' \
+        | sed -n 's/.*"stop_hook_active"[[:space:]]*:[[:space:]]*true.*/FOUND/p'
+)"
+if [ "${STOP_HOOK_ACTIVE}" = "FOUND" ]; then
+    advisory_report
+    exit 0
+fi
 
 # Guard 2: an in_progress phase must exist. Merely complete<total is a normal
 # state and must NOT block (issue #178 lesson).
@@ -188,10 +205,14 @@ fi
 
 # All guards passed: block the stop.
 # json_escape: escape a string for safe inclusion in a JSON string literal.
-# Handles backslash and double-quote (the only characters that can break the
-# fixed template since the phase heading is single-line plain text).
+# Escapes backslash and double-quote, then neutralizes every bare control
+# character JSON forbids (0x01-0x1F) by mapping it to a space. A phase heading
+# may carry a literal tab or other control byte; left raw it produces invalid
+# JSON ("Bad control character in string literal") that the Stop hook rejects.
 json_escape() {
-    printf "%s" "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+    printf "%s" "$1" \
+        | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
+        | tr '\001-\037' ' '
 }
 
 # first_in_progress_phase: heading text of the first phase whose Status is

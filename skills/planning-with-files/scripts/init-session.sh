@@ -115,7 +115,18 @@ gen_nonce() {
     # 16 hex chars for the plan-data delimiter framing (security strand rec 8).
     # short_uuid() yields 8 hex chars; concatenate two draws and clip to 16 so
     # the result stays exactly 16 even if a fallback path over-produces.
-    printf '%s%s' "$(short_uuid)" "$(short_uuid)" | tr -d '\n' | cut -c1-16
+    _n1="$(short_uuid)"
+    _n2="$(short_uuid)"
+    # short_uuid's third-level fallback is printf '%08x' "$(date +%s)" with
+    # 1-second resolution: two draws in the same second return the SAME 8 hex,
+    # collapsing the nonce to the epoch value doubled (32 bits, not 64). When
+    # the halves match, mix the PID into the second half so the nonce keeps 64
+    # bits of unpredictability on the no-uuid fallback path (Alpine/minimal).
+    if [ "$_n1" = "$_n2" ]; then
+        printf '%08x%08x' "$(date +%s)" "$$" | tr -d '\n' | cut -c1-16
+    else
+        printf '%s%s' "$_n1" "$_n2" | tr -d '\n' | cut -c1-16
+    fi
 }
 
 # Apply v3 opt-in mode side effects to a plan directory.
