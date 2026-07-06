@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.0] - 2026-07-06
+
+### Added
+
+- **`/plan-execute` approval gate for the Pi extension** (PR #193 by @Dikshj, closes #190, requested by @lazyst). The Pi extension hooks previously activated as soon as `task_plan.md` existed on disk: plan injection on `before_agent_start`, pre-tool recitation on `tool_call`, post-write reminders on `tool_result`, and auto-continue on `agent_end` could all start while the user was still reviewing a draft plan. The extension now stays passive until the user approves the active plan with `/plan-execute`; before approval it shows a status line ("run /plan-execute to activate hooks") and nothing else. Approval is scoped to the current session and plan path, is cleared on session lifecycle events, and `/plan-execute reset` returns the plan to passive review mode. A plan whose SHA-256 attestation shows tampering cannot be approved. This gates initial hook activation only; the v3 gate mode (which gates stopping on an incomplete plan) is unchanged. Pi docs, Pi skill docs, and runtime tests cover the passive review flow.
+
+### Verification
+
+- Python suite: 188 passed, 5 skipped, 0 failed.
+- Pi extension vitest suite: 21 passed (2 files).
+- `scripts/sync-ide-folders.py --verify`: all IDE folders in sync.
+- Supply-chain review on PR #193: no new dependencies, no install scripts, no bin shims, no network calls; changes confined to the Pi extension runtime, its tests, and documentation. The gate itself tightens the injection path, since a tampered or unreviewed plan can no longer reach model context automatically.
+
+### Thanks
+
+- @Dikshj (diksha) for implementing the /plan-execute approval gate with runtime and docs test coverage (PR #193).
+- @lazyst for the feature request and the precise passive-until-confirmed workflow description (#190).
+
 ## [3.2.0] - 2026-07-03
 
 A repository health audit covering the v3 long-running-session mechanism, the

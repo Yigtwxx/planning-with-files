@@ -106,6 +106,12 @@ These amazing people have contributed code, documentation, or significant improv
 
 ### Other Contributors
 
+- **[@Dikshj](https://github.com/Dikshj)** (diksha) - [PR #193](https://github.com/OthmanAdi/planning-with-files/pull/193), closes [Issue #190](https://github.com/OthmanAdi/planning-with-files/issues/190)
+  - Added the `/plan-execute` approval command to the Pi extension: hooks previously activated the moment `task_plan.md` existed, so plan injection, pre-tool recitation, post-write reminders, and auto-continue could start while the user was still reviewing a draft plan
+  - The extension now stays passive (status line only) until the user approves the active plan; approval is scoped to the current session and plan path, resets on session lifecycle events, and `/plan-execute reset` returns to passive review mode
+  - A plan with a tampered SHA-256 attestation cannot be approved, and the runtime test suite plus Python docs guards cover the passive review flow
+  - **Impact:** Pi users can draft and review a plan without the extension pushing execution before they have confirmed it, closing the workflow gap reported in #190
+
 - **[@2023Anita](https://github.com/2023Anita)** - [PR #180](https://github.com/OthmanAdi/planning-with-files/pull/180), [Issue #178](https://github.com/OthmanAdi/planning-with-files/issues/178)
   - Made the Codex Stop hook non-blocking for incomplete plans: `.codex/hooks/stop.py` previously emitted `{"decision": "block"}` on the first stop while phases were still pending, which pushed the agent to continue into the next phase without the user asking
   - Collapsed the conditional block path to a single advisory `systemMessage` and rewrote `.codex/hooks/stop.sh` to drop the imperative "continue working on the remaining phases" wording, keeping only the progress-sync reminder
@@ -311,6 +317,7 @@ Thank you to everyone who reported issues, provided feedback, and helped test fi
 - [@luyanfeng](https://github.com/luyanfeng) - Issue #172 (OpenCode install/verify paths doubled the folder segment in docs/opencode.md; fixed in v2.43.0)
 - [@mixian939](https://github.com/mixian939) - Issue #191 (Codex hooks reporting a false "0/0 phases complete" status for an unstructured task_plan.md, with a full root-cause diagnosis and suggested fix; the audit this triggered found and fixed the same defect in the canonical scripts and two other IDE adapters, fixed in v3.2.0)
 - [@AvitalAviv](https://github.com/AvitalAviv) - Issue #188 (flagged that the repo had no private vulnerability disclosure channel; private vulnerability reporting is now enabled and documented in SECURITY.md)
+- [@lazyst](https://github.com/lazyst) - Issue #190 (feature request describing the Pi extension activating hooks on a draft plan before user confirmation, with the exact passive-until-confirmed behavior that shipped as `/plan-execute` in v3.3.0)
 
 And many others who have starred, forked, and shared this project!
 
@@ -340,4 +347,4 @@ If you've contributed and don't see your name here, please open an issue! We wan
 
 **Total Contributors:** 50+ and growing!
 
-*Last updated: July 3, 2026*
+*Last updated: July 6, 2026*
