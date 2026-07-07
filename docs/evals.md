@@ -1,6 +1,8 @@
 # Benchmark Results: planning-with-files
 
-Formal evaluation of `planning-with-files` using Anthropic's [skill-creator](https://github.com/anthropics/skills/tree/main/skills/skill-creator) framework, plus later functional verification of v3-specific mechanisms. This document records the full methodology, test cases, grading criteria, and results. Tests 1 through 3 were run against v2.22.0 (2026-03-06); Test 4 was run against v3.2.0 (2026-07-03).
+Formal evaluation of `planning-with-files` using Anthropic's [skill-creator](https://github.com/anthropics/skills/tree/main/skills/skill-creator) framework, plus later functional verification of v3-specific mechanisms, plus a first competitive benchmark against six alternative planning methods. This document records the full methodology, test cases, grading criteria, and results. Tests 1 through 3 were run against v2.22.0 (2026-03-06); Test 4 was run against v3.2.0 (2026-07-03); Test 5 was run against v3.4.0 (2026-07-06).
+
+An animated summary of Test 5 lives at [docs/benchmark/index.html](benchmark/index.html) ([rendered view](https://htmlpreview.github.io/?https://github.com/OthmanAdi/planning-with-files/blob/master/docs/benchmark/index.html)).
 
 ---
 
@@ -182,6 +184,94 @@ Even fixed, `session-catchup.py` replays conversation transcript from the previo
 
 ---
 
+## Test 5: Competitive Benchmark v1, Seven Planning Methods Head to Head (2026-07-06, internal)
+
+The earlier tests compare pwf against *no skill*. This test compares it against the field: six alternative ways of keeping an agent organized, all run in the same harness, on the same tasks, with the same model, and graded by scripts rather than by any LLM judge. It is an internal v1: the tasks are harness-authored (a disclosed limitation), and several pre-publication rigor gates for a standalone public benchmark (external task corpus, competitor-author review, cross-family jury for judged axes) are still open. Numbers below are exactly what the deterministic oracles produced, including the ones where pwf pays and the ones where nobody wins.
+
+### Arms (pinned)
+
+| Arm | What it is | Source |
+|-----|------------|--------|
+| native | Claude Code as shipped, TodoWrite allowed. The confound control | CLI 2.1.201 |
+| filesystem | One neutral paragraph: "maintain your working state in files in ./notes/" | harness-authored |
+| naive-plan | A minimal 15-line dev-plan SKILL.md | harness-authored |
+| **planning-with-files** | v3.4.0, skill plus hooks per its own docs | commit d71b3be |
+| superpowers | Only its brainstorming, writing-plans, and executing-plans skills (isolation disclosed; the full framework is more than a planning skill) | d884ae0 |
+| spec-kit | Spec-Driven Development templates and workflow, ported to a CLAUDE.md project rule (port disclosed) | bba473c |
+| memory-bank | Cline's memory-bank.md verbatim as project rules (port disclosed) | ed2c617c |
+
+Executor: claude-opus-4-8 for every arm. Same tool allowlist everywhere. Each run in an isolated project directory with an isolated Claude home. Grading: pytest suites plus scripted transcript and file-state analysis (`grade.json` per run). No LLM grades anything in this test.
+
+### Tasks
+
+| Task | Shape | Trials | Skill invocation |
+|------|-------|--------|------------------|
+| O1 build-multiphase | CLI inventory tool, provided test suite, 4 natural phases | 3 per arm | unforced (prompt never mentions any skill) |
+| O2 recovery | Same build, session hard-stopped at ~50%, fresh session told only "Continue the work in this directory." | 5 per arm | unforced |
+| O6 recovery-forced | Larger 6-component log-analysis CLI, same hard-stop protocol | 3 per arm | forced (each arm explicitly told to use its method) |
+
+77 graded cells total. Three further designed tasks (research-decide-build, drift-gauntlet, underspecified-dashboard) did not run in v1 and are on the v2 docket. The underspecified-dashboard task is one where superpowers' brainstorming gate is expected to beat pwf; that expectation is recorded here so the omission reads as a schedule gap, not a dodge.
+
+### Result 1: outcome saturation. Nobody wins on pass rate
+
+Every arm passed every task. 77 of 77 runs end with the provided pytest suite green, including the native baseline with no planning method at all. On single-session tasks of this size (8 to 29 turns), a frontier model completes the work regardless of how it is organized. **Task-outcome pass rate cannot rank planning skills at this task size**, for pwf or for anyone else. Benchmarks that claim otherwise on similar tasks are measuring noise.
+
+What does separate the arms: whether the method engages at all when nobody forces it, what a resume costs after context death, and what the method costs in tokens and turns.
+
+### Result 2: unforced trigger reliability is the field's real weakness, ours included
+
+With prompts that never mention any skill, how often did each method actually engage (create its planning artifact before implementation)?
+
+| Arm | O1 (n=3) | O2 (n=5) |
+|-----|----------|----------|
+| filesystem instruction | 3/3 | 5/5 |
+| naive-plan skill | 3/3 | 5/5 |
+| spec-kit as project rule | 3/3 | 5/5 |
+| memory-bank as project rule | 1/3 | 4/5 |
+| **planning-with-files** | **2/3** | **3/5** |
+| superpowers skills | 0/3 | 0/5 |
+| native | 0/3 | 0/5 (in-context TodoWrite only) |
+
+Methods that live in always-loaded context (project rules, a plain instruction) engaged every time. Skill-triggered methods engaged probabilistically: pwf missed 1 of 3 and 2 of 5; superpowers' planning skills never self-triggered in this harness. This is the top item on our own improvement backlog, and it is also the strongest argument for hook-based mechanisms over model-remembers-to-do-it conventions: hooks fire deterministically, but only once a plan exists.
+
+### Result 3: when engaged, pwf resumes fastest after context death
+
+O6 protocol: kill the session at roughly half done, start a fresh one in the same directory with only "Continue the work in this directory." All arms eventually finished (saturation again), asked the user nothing, and redid no completed work. The separation is the cost of re-orientation, measured in stage-2 turns to completion:
+
+| Arm | Stage-2 turns (mean, T=3) | Total cost (both stages) |
+|-----|---------------------------|--------------------------|
+| **planning-with-files** | **5.0** | $0.86 |
+| filesystem | 8.3 | $0.76 |
+| spec-kit | 10.0 | $1.09 |
+| naive-plan | 12.3 | $0.87 |
+| memory-bank | 13.0 | $0.94 |
+| native | 13.3 | $0.81 |
+| superpowers | 13.3 | $1.18 |
+
+A pwf resume took 5 turns: 40% fewer than the next-best arm and roughly 2.7x fewer than native or superpowers. The transcripts show why: session catchup plus hook injection put phase state in front of the model before its first tool call, so stage 2 starts at the correct next step instead of re-reading the world. On the unforced O2 variant the gap compresses (pwf 7.2 turns, naive-plan 6.8, filesystem 8.2): when trigger misses mean the plan may not exist, the recovery advantage shrinks accordingly. The mechanism only pays when the plan is on disk. That conditionality is the honest headline of this whole benchmark.
+
+### Result 4: the overhead is real and we are the ones paying it
+
+On the unforced build task, pwf averaged $0.634 and 15.3 turns; the arms that did no planning ran $0.31 to $0.42 and 7 to 10 turns. Structured planning cost roughly 50 to 100% extra on a task this small, and pwf sits at the expensive end together with spec-kit ($0.724, 14.0 turns). Separately measured mechanism overhead: about 330 tokens re-injected per user turn plus about 90 per matched tool call, and on this Windows test machine 2.0 to 2.4 seconds of wall clock per hook fire (a regression from about 0.8s measured at v2.39; profiling it is on the backlog). pwf is the only arm paying any per-turn overhead. That is the price of being the only arm whose recovery, re-surfacing, tamper-detection, plan-isolation, and compaction-survival behaviors are mechanisms rather than instructions the model may or may not follow.
+
+### Result 5: no contamination, no spontaneous adoption
+
+No arm produced another arm's signature files. The native and filesystem arms never spontaneously created task_plan.md, findings.md, or progress.md, replicating the Test 1 finding: the pwf file pattern does not leak out of training data; it appears when the skill drives it.
+
+### A grading bug we caught, disclosed because it matters
+
+The first grading pass under-credited superpowers and spec-kit: the plan-artifact detector matched filenames like plan.md but not their directory layouts (docs/superpowers/plans/DATE-slug.md, specs/FEATURE/). That pass falsely scored superpowers' forced-mode process metrics at zero and falsely flagged its own plan-file update as redone work. The detector was fixed and all 77 cells re-graded before anything was published; post-fix, superpowers' forced-mode process metrics are 100%. Cross-tool graders must be validated against each tool's real artifact layout, and a benchmark run by one tool's author doubly so.
+
+### What this test does not measure
+
+Trigger rates under varied natural phrasing (two unforced tasks only). Long-horizon drift and mid-task distractors (designed task did not run). Underspecified-task brainstorming, where superpowers is expected to win. Plan quality as judged output (needs a cross-family jury before it can be reported). Cross-IDE behavior (Claude Code only). Multi-day horizons. None of the above is claimed.
+
+### Reproducing
+
+The harness (cell runner with pinned flags and isolated home, wave orchestrator, deterministic graders, aggregator with 95% CIs, task specs committed before any run, arm sources at pinned SHAs) and all 77 raw run directories (transcripts, file-tree hashes, per-run grades) live in the benchmark workspace, not tracked in this repo. The grading and aggregation scripts are deterministic; re-running them on the raw runs reproduces every number above.
+
+---
+
 ## Summary
 
 | Test | Status | Result |
@@ -190,6 +280,7 @@ Even fixed, `session-catchup.py` replays conversation transcript from the previo
 | A/B Blind Comparison | ✅ Complete | 3/3 wins (100%) for with_skill |
 | Description Optimizer | Pending | Scheduled for next eval cycle |
 | v3 Long-Running Session Functional Verification | ✅ Complete (2026-07-03) | 2 of 6 mechanisms found broken on Windows and fixed in v3.2.0; see Test 4 |
+| Competitive Benchmark v1 (7 methods) | ✅ Complete (2026-07-06, internal) | Outcomes saturate at 77/77 pass for ALL arms; pwf resumes in 5.0 turns vs 8.3 to 13.3 for rivals when engaged; unforced trigger rate 60 to 67% is our top backlog item; overhead reported: +50 to 100% cost on small tasks, ~2s/hook-fire on Windows |
 
 The skill demonstrably enforces the 3-file planning pattern across diverse task types. Without the skill, agents default to ad-hoc file naming and skip the structured planning workflow entirely. Separately, v3's session-recovery mechanism is now verified functional on Windows as of v3.2.0; it was not before, and nothing in the test suite would have caught that on its own.
 
