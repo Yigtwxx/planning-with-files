@@ -32,6 +32,29 @@ def have_sh() -> bool:
     return shutil.which("sh") is not None
 
 
+def host_realpath(sh_path: str) -> str:
+    """Canonicalize a path emitted by an sh script for host-side comparison.
+
+    Under Git Bash on Windows the resolver prints POSIX-style paths, and the
+    user temp directory is mounted at /tmp, so os.path.realpath on the raw
+    string would resolve against a nonexistent C:\\tmp and the containment
+    assertion would fail even though the resolved dir is contained. Map the
+    path back to its Windows form with cygpath first, then canonicalize.
+    """
+    if os.name == "nt" and sh_path.startswith("/"):
+        cygpath = shutil.which("cygpath")
+        if cygpath:
+            mapped = subprocess.run(
+                [cygpath, "-w", sh_path],
+                text=True,
+                capture_output=True,
+                check=False,
+            ).stdout.strip()
+            if mapped:
+                sh_path = mapped
+    return os.path.realpath(sh_path)
+
+
 def can_make_escaping_symlink() -> bool:
     """True only if we can create a dir symlink that realpath sees escaping root.
 
@@ -123,10 +146,12 @@ class ContainmentTests(unittest.TestCase):
                 resolved.endswith("escape"),
                 f"escaping symlink dir must be rejected, got {resolved!r}",
             )
-            # And the resolved path (if any) must stay under the root.
+            # And the resolved path (if any) must stay under the root. Compare
+            # both sides in the host path domain: the resolver's stdout is a
+            # POSIX-style path under Git Bash (see host_realpath).
             if resolved:
                 self.assertTrue(
-                    os.path.realpath(resolved).startswith(os.path.realpath(str(root))),
+                    host_realpath(resolved).startswith(os.path.realpath(str(root))),
                     f"resolved path escaped root: {resolved!r}",
                 )
 
